@@ -1,4 +1,3 @@
-
 import javax.imageio.ImageIO;
 import javax.swing.*;
 import javax.xml.parsers.*;
@@ -6,6 +5,7 @@ import javax.xml.transform.*;
 import javax.xml.transform.dom.DOMSource;
 import javax.xml.transform.stream.StreamResult;
 import java.awt.*;
+import java.awt.datatransfer.*;
 import java.awt.event.*;
 import java.awt.geom.Ellipse2D;
 import java.awt.image.BufferedImage;
@@ -15,20 +15,33 @@ import java.util.ArrayList;
 import java.util.List;
 import org.w3c.dom.*;
 
-class MindMapNode {
+public class MindMapNode {
     String text;
-    int x, y;
-    int width, height;
+    public int x;
+    public int y;
+    public int width;
+    public int height;
     Color color;
-    boolean isSelected=false;
-    List<MindMapNode> children = new ArrayList<>();
+    boolean isSelected = false;
+    BufferedImage image = null;  // New field for storing an image
+    public List<MindMapNode> children = new ArrayList<>();
 
+    // Constructor for text node
     MindMapNode(String text, int x, int y, Color color) {
         this.text = text;
         this.x = x;
         this.y = y;
         this.color = color;
         adjustSize();
+    }
+
+    // Constructor for image node
+    MindMapNode(BufferedImage image, int x, int y) {
+        this.image = image;
+        this.x = x;
+        this.y = y;
+        this.width = image.getWidth();
+        this.height = image.getHeight();
     }
 
     void adjustSize() {
@@ -110,7 +123,6 @@ class MindMapSurface extends JPanel {
                 }
             }
         });
-
         addMouseMotionListener(new MouseAdapter() {
             @Override
             public void mouseDragged(MouseEvent e) {
@@ -118,6 +130,27 @@ class MindMapSurface extends JPanel {
                     selectedNode.x = e.getX() - selectedNode.width / 2;
                     selectedNode.y = e.getY() - selectedNode.height / 2;
                     repaint();
+                }
+            }
+        });
+
+        // Add a key listener for Ctrl + V to paste images from clipboard
+        setFocusable(true);
+        addKeyListener(new KeyAdapter() {
+            @Override
+            public void keyPressed(KeyEvent e) {
+                if (e.isControlDown() && e.getKeyCode() == KeyEvent.VK_V) {
+                    BufferedImage clipboardImage = getClipboardImage();
+                    if (clipboardImage != null) {
+                        if (selectedNode != null) {
+                            MindMapNode imageNode = new MindMapNode(clipboardImage, selectedNode.x + selectedNode.width + 10, selectedNode.y);
+                            selectedNode.addChild(imageNode);
+                            nodes.add(imageNode);
+                            repaint();
+                        }
+                    } else {
+                        JOptionPane.showMessageDialog(null, "No image found in the clipboard.", "Error", JOptionPane.ERROR_MESSAGE);
+                    }
                 }
             }
         });
@@ -157,18 +190,18 @@ class MindMapSurface extends JPanel {
                 }
             }
         });
+
         JMenuItem exportToPNGItem = new JMenuItem("Export to PNG");
         exportToPNGItem.addActionListener(e -> exportToPNG());
 
         JMenuItem exportToXMLItem = new JMenuItem("Export to XML");
         exportToXMLItem.addActionListener(e -> exportToXML());
 
-
         menu.add(addChildItem);
-        menu.add(exportToXMLItem);
         menu.add(deleteItem);
         menu.add(changeColorItem);
         menu.add(exportToPNGItem);
+        menu.add(exportToXMLItem);
 
         return menu;
     }
@@ -189,7 +222,17 @@ class MindMapSurface extends JPanel {
         nodes.add(node);
         repaint();
     }
-
+    private BufferedImage getClipboardImage() {
+        try {
+            Transferable transferable = Toolkit.getDefaultToolkit().getSystemClipboard().getContents(null);
+            if (transferable != null && transferable.isDataFlavorSupported(DataFlavor.imageFlavor)) {
+                return (BufferedImage) transferable.getTransferData(DataFlavor.imageFlavor);
+            }
+        } catch (Exception ex) {
+            ex.printStackTrace();
+        }
+        return null;
+    }
 
     @Override
     protected void paintComponent(Graphics g) {
@@ -201,13 +244,13 @@ class MindMapSurface extends JPanel {
                 RenderingHints.VALUE_ANTIALIAS_ON);
         g2d.setRenderingHints(rh);
 
-        // Before drawing, let's ensure we're only drawing connections for existing nodes
         for (MindMapNode node : nodes) {
             drawNode(g2d, node);
         }
+
         for (MindMapNode node : nodes) {
             for (MindMapNode child : node.children) {
-                if (nodes.contains(child)) { // Draw connection only if the child is in the active nodes list
+                if (nodes.contains(child)) {
                     drawConnection(g2d, node.x + node.width / 2, node.y + node.height / 2, child.x + child.width / 2, child.y + child.height / 2);
                 }
             }
@@ -215,12 +258,16 @@ class MindMapSurface extends JPanel {
     }
 
     private void drawNode(Graphics2D g2d, MindMapNode node) {
-        Ellipse2D shape = new Ellipse2D.Double(node.x, node.y, node.width, node.height);
-        g2d.setColor(node.color);
-        g2d.fill(shape);
-        g2d.setColor(Color.BLACK);
-        g2d.draw(shape);
-        drawCenteredText(g2d, node.text, node.x, node.y, node.width, node.height);
+        if (node.image != null) {
+            g2d.drawImage(node.image, node.x, node.y, null);
+        } else {
+            Ellipse2D shape = new Ellipse2D.Double(node.x, node.y, node.width, node.height);
+            g2d.setColor(node.color);
+            g2d.fill(shape);
+            g2d.setColor(Color.BLACK);
+            g2d.draw(shape);
+            drawCenteredText(g2d, node.text, node.x, node.y, node.width, node.height);
+        }
     }
 
     private void drawConnection(Graphics2D g2d, int x1, int y1, int x2, int y2) {
@@ -234,6 +281,7 @@ class MindMapSurface extends JPanel {
         int textY = y + ((height - fm.getHeight()) / 2) + fm.getAscent();
         g2d.drawString(text, textX, textY);
     }
+
     private void exportToXML() {
         try {
             DocumentBuilderFactory dbFactory = DocumentBuilderFactory.newInstance();
@@ -247,7 +295,7 @@ class MindMapSurface extends JPanel {
                 nodeElement.setAttribute("Text", node.text);
                 nodeElement.setAttribute("X", String.valueOf(node.x));
                 nodeElement.setAttribute("Y", String.valueOf(node.y));
-                nodeElement.setAttribute("Color", Integer.toHexString(node.color.getRGB() & 0xffffff)); // Mask to remove alpha bits
+                nodeElement.setAttribute("Color", Integer.toHexString(node.color.getRGB() & 0xffffff));
                 rootElement.appendChild(nodeElement);
             }
 
@@ -264,7 +312,6 @@ class MindMapSurface extends JPanel {
             JOptionPane.showMessageDialog(this, "Failed to export as XML.", "Export Error", JOptionPane.ERROR_MESSAGE);
         }
     }
-
     private void exportToPNG() {
         BufferedImage image = new BufferedImage(getWidth(), getHeight(), BufferedImage.TYPE_INT_RGB);
         Graphics2D g2 = image.createGraphics();
@@ -279,8 +326,7 @@ class MindMapSurface extends JPanel {
         }
     }
 }
-
-public class MindMapApp extends JFrame {
+class MindMapApp extends JFrame {
     public MindMapApp() {
         initUI();
     }
